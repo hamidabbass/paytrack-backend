@@ -1,0 +1,36 @@
+# Django Core
+Django==4.2.7
+djangorestframework==3.14.0
+django-cors-headers==4.3.0
+
+# Authentication
+djangorestframework-simplejwt==5.3.0
+PyJWT==2.8.0
+
+# Database (optional - for PostgreSQL)
+# psycopg2-binary==2.9.9
+
+# WebSocket Support
+channels==4.0.0
+channels-redis==4.1.0
+daphne==4.0.0
+
+# Media Storage
+Pillow==10.1.0
+django-storages==1.14.2
+boto3==1.33.0  # For S3
+cloudinary==1.36.0
+django-cloudinary-storage==0.3.0
+
+# Utilities
+python-dotenv==1.0.0
+python-decouple==3.8
+schedule==1.2.1
+requests==2.31.0
+
+# Development
+django-debug-toolbar==4.2.0
+
+# Production
+gunicorn==21.2.0
+whitenoise==6.6.0

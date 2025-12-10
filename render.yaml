@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: paytrack-backend
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn installment_app.wsgi:application
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: installment_app.settings
+      # Add your secret keys and database URL here
+      # - key: DATABASE_URL
+      #   value: <your_postgres_url>
+    autoDeploy: true

@@ -15,9 +15,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-change-this-in-production-key-12345')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = config('DEBUG', default=True, cast=bool)
+DEBUG = config('DEBUG', default=False, cast=bool)  # Set to False for production
 
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='*').split(',')
+# For Render, set ALLOWED_HOSTS to your Render domain, e.g. 'paytrack-backend.onrender.com'
+# In Render dashboard, set ALLOWED_HOSTS=paytrack-backend.onrender.com
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='paytrack-backend.onrender.com').split(',')
 
 # Application definition
 INSTALLED_APPS = [

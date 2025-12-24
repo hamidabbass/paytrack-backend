@@ -401,3 +401,149 @@ class SupportTicketDetailView(generics.RetrieveAPIView):
             'success': True,
             'data': serializer.data
         })
+
+
+class ForgotPasswordView(APIView):
+    """
+    Request password reset OTP.
+    POST /api/auth/forgot-password/
+    """
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        from .serializers import ForgotPasswordSerializer
+        from .models import PasswordResetOTP
+        import random
+        from datetime import timedelta
+        from django.core.mail import send_mail
+        from django.conf import settings
+        
+        serializer = ForgotPasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        email = serializer.validated_data['email']
+        
+        # Invalidate any existing OTPs for this email
+        PasswordResetOTP.objects.filter(email=email, is_used=False).update(is_used=True)
+        
+        # Generate 6-digit OTP
+        otp = ''.join([str(random.randint(0, 9)) for _ in range(6)])
+        
+        # Create OTP record (valid for 10 minutes)
+        otp_record = PasswordResetOTP.objects.create(
+            email=email,
+            otp=otp,
+            expires_at=timezone.now() + timedelta(minutes=10)
+        )
+        
+        # Try to send email (won't fail if email sending fails)
+        try:
+            send_mail(
+                subject='Password Reset OTP - PayTrack',
+                message=f'Your OTP for password reset is: {otp}\n\nThis OTP is valid for 10 minutes.\n\nIf you did not request this, please ignore this email.',
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
+                fail_silently=True,
+            )
+        except Exception as e:
+            print(f"Email sending failed: {e}")
+        
+        return Response({
+            'success': True,
+            'message': 'If an account exists with this email, you will receive an OTP shortly.',
+            'otp': otp  # Remove this in production! Only for testing
+        })
+
+
+class VerifyOTPView(APIView):
+    """
+    Verify OTP for password reset.
+    POST /api/auth/verify-otp/
+    """
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        from .serializers import VerifyOTPSerializer
+        from .models import PasswordResetOTP
+        
+        serializer = VerifyOTPSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        email = serializer.validated_data['email']
+        otp = serializer.validated_data['otp']
+        
+        # Find valid OTP
+        otp_record = PasswordResetOTP.objects.filter(
+            email=email,
+            otp=otp,
+            is_used=False
+        ).order_by('-created_at').first()
+        
+        if not otp_record:
+            return Response({
+                'success': False,
+                'message': 'Invalid OTP.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if otp_record.is_expired:
+            return Response({
+                'success': False,
+                'message': 'OTP has expired. Please request a new one.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        return Response({
+            'success': True,
+            'message': 'OTP verified successfully.'
+        })
+
+
+class ResetPasswordView(APIView):
+    """
+    Reset password with OTP.
+    POST /api/auth/reset-password/
+    """
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        from .serializers import ResetPasswordSerializer
+        from .models import PasswordResetOTP
+        
+        serializer = ResetPasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        email = serializer.validated_data['email']
+        otp = serializer.validated_data['otp']
+        new_password = serializer.validated_data['new_password']
+        
+        # Find valid OTP
+        otp_record = PasswordResetOTP.objects.filter(
+            email=email,
+            otp=otp,
+            is_used=False
+        ).order_by('-created_at').first()
+        
+        if not otp_record:
+            return Response({
+                'success': False,
+                'message': 'Invalid OTP.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if otp_record.is_expired:
+            return Response({
+                'success': False,
+                'message': 'OTP has expired. Please request a new one.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Mark OTP as used
+        otp_record.is_used = True
+        otp_record.save()
+        
+        # Update user's password
+        user = User.objects.get(email=email)
+        user.set_password(new_password)
+        user.save()
+        
+        return Response({
+            'success': True,
+            'message': 'Password reset successfully. You can now login with your new password.'
+        })

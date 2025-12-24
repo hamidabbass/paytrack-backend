@@ -288,3 +288,41 @@ class SupportTicketSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data['user'] = self.context['request'].user
         return super().create(validated_data)
+
+
+class ForgotPasswordSerializer(serializers.Serializer):
+    """Serializer for requesting password reset OTP."""
+    
+    email = serializers.EmailField(required=True)
+    
+    def validate_email(self, value):
+        if not User.objects.filter(email=value).exists():
+            raise serializers.ValidationError('No account found with this email address.')
+        return value
+
+
+class VerifyOTPSerializer(serializers.Serializer):
+    """Serializer for verifying OTP."""
+    
+    email = serializers.EmailField(required=True)
+    otp = serializers.CharField(required=True, max_length=6, min_length=6)
+
+
+class ResetPasswordSerializer(serializers.Serializer):
+    """Serializer for resetting password with OTP."""
+    
+    email = serializers.EmailField(required=True)
+    otp = serializers.CharField(required=True, max_length=6, min_length=6)
+    new_password = serializers.CharField(
+        required=True,
+        write_only=True,
+        validators=[validate_password]
+    )
+    new_password_confirm = serializers.CharField(required=True, write_only=True)
+    
+    def validate(self, attrs):
+        if attrs['new_password'] != attrs['new_password_confirm']:
+            raise serializers.ValidationError({
+                'new_password_confirm': 'Passwords do not match.'
+            })
+        return attrs

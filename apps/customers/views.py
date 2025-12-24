@@ -227,3 +227,229 @@ class PaymentRecordViewSet(viewsets.ModelViewSet):
         else:
             months = diff.days // 30
             return f'{months} month{"s" if months > 1 else ""} ago'
+    
+    @action(detail=False, methods=['get'])
+    def monthly_reports(self, request):
+        """Get monthly and yearly payment reports."""
+        from django.utils import timezone
+        from django.db.models import Sum
+        from django.db.models.functions import ExtractMonth, ExtractYear
+        from datetime import date
+        from calendar import month_name
+        
+        # Get year parameter (default to current year)
+        year = request.query_params.get('year')
+        if year:
+            try:
+                year = int(year)
+            except ValueError:
+                year = timezone.now().year
+        else:
+            year = timezone.now().year
+        
+        # Get all payments for this shopkeeper
+        payments = self.get_queryset()
+        
+        # Current month stats
+        today = timezone.now().date()
+        
+        current_month_payments = payments.filter(
+            payment_date__year=today.year,
+            payment_date__month=today.month
+        ).aggregate(
+            total=Sum('amount_paid'),
+            count=Count('id')
+        )
+        
+        # Year-to-date stats
+        year_payments = payments.filter(
+            payment_date__year=year
+        ).aggregate(
+            total=Sum('amount_paid'),
+            count=Count('id')
+        )
+        
+        # Monthly breakdown for the selected year - get all data
+        monthly_data = payments.filter(
+            payment_date__year=year
+        ).annotate(
+            month=ExtractMonth('payment_date')
+        ).values('month').annotate(
+            total=Sum('amount_paid'),
+            count=Count('id')
+        ).order_by('month')
+        
+        # Create a dict for easy lookup
+        monthly_dict = {item['month']: item for item in monthly_data}
+        
+        # Build all 12 months
+        monthly_breakdown = []
+        for month_num in range(1, 13):
+            if month_num in monthly_dict:
+                item = monthly_dict[month_num]
+                monthly_breakdown.append({
+                    'month': month_num,
+                    'month_name': month_name[month_num],
+                    'total': str(item['total'] or 0),
+                    'count': item['count']
+                })
+            else:
+                monthly_breakdown.append({
+                    'month': month_num,
+                    'month_name': month_name[month_num],
+                    'total': '0',
+                    'count': 0
+                })
+        
+        # Get available years (years with payments)
+        available_years = payments.annotate(
+            year=ExtractYear('payment_date')
+        ).values('year').distinct().order_by('-year')
+        
+        years_list = [item['year'] for item in available_years if item['year']]
+        if year not in years_list:
+            years_list.insert(0, year)
+        
+        return Response({
+            'selected_year': year,
+            'available_years': sorted(years_list, reverse=True),
+            'current_month': {
+                'month_name': month_name[today.month],
+                'month': today.month,
+                'year': today.year,
+                'total': str(current_month_payments['total'] or 0),
+                'count': current_month_payments['count'] or 0
+            },
+            'year_to_date': {
+                'year': year,
+                'total': str(year_payments['total'] or 0),
+                'count': year_payments['count'] or 0
+            },
+            'monthly_breakdown': monthly_breakdown
+        })
+    
+    @action(detail=False, methods=['get'])
+    def month_detail(self, request):
+        """Get detailed payment data for a specific month."""
+        from django.utils import timezone
+        from django.db.models import Sum, Count
+        from datetime import date
+        from calendar import month_name
+        
+        # Get year and month parameters
+        year = request.query_params.get('year')
+        month = request.query_params.get('month')
+        
+        if not year or not month:
+            return Response({'error': 'Year and month parameters are required'}, status=400)
+        
+        try:
+            year = int(year)
+            month = int(month)
+        except ValueError:
+            return Response({'error': 'Invalid year or month'}, status=400)
+        
+        if month < 1 or month > 12:
+            return Response({'error': 'Month must be between 1 and 12'}, status=400)
+        
+        # Get all payments for this month
+        payments = self.get_queryset().filter(
+            payment_date__year=year,
+            payment_date__month=month
+        ).select_related('installment_record__customer')
+        
+        # Summary stats
+        total_paid = payments.aggregate(total=Sum('amount_paid'))['total'] or 0
+        total_payments = payments.count()
+        
+        # Get unique customers who made payments this month
+        customer_ids = payments.values_list(
+            'installment_record__customer_id', flat=True
+        ).distinct()
+        
+        # Get all installment records that had payments this month
+        installment_ids = payments.values_list('installment_record_id', flat=True).distinct()
+        
+        # Get installment records
+        from .models import InstallmentRecord, Customer
+        installments = InstallmentRecord.objects.filter(
+            id__in=installment_ids,
+            shopkeeper=request.user
+        ).select_related('customer')
+        
+        paid_installments = installments.filter(is_completed=True).count()
+        pending_installments = installments.filter(is_completed=False).count()
+        
+        # Get remaining amount for pending installments
+        total_remaining = installments.filter(is_completed=False).aggregate(
+            total=Sum('remaining_amount')
+        )['total'] or 0
+        
+        # Get customer details with their payments for this month
+        customers_data = []
+        unique_customers = Customer.objects.filter(
+            id__in=customer_ids,
+            shopkeeper=request.user
+        )
+        
+        for customer in unique_customers:
+            # Get payments for this customer in this month
+            customer_payments = payments.filter(
+                installment_record__customer=customer
+            )
+            
+            customer_total_paid = customer_payments.aggregate(
+                total=Sum('amount_paid')
+            )['total'] or 0
+            
+            customer_payment_count = customer_payments.count()
+            
+            # Get customer's installments that had payments
+            customer_installments = installments.filter(customer=customer)
+            customer_remaining = customer_installments.filter(is_completed=False).aggregate(
+                total=Sum('remaining_amount')
+            )['total'] or 0
+            
+            customer_paid_installments = customer_installments.filter(is_completed=True).count()
+            customer_pending_installments = customer_installments.filter(is_completed=False).count()
+            
+            # Get individual payment records
+            payment_records = []
+            for payment in customer_payments.order_by('-payment_date'):
+                payment_records.append({
+                    'id': str(payment.id),
+                    'amount': str(payment.amount_paid),
+                    'date': payment.payment_date.strftime('%Y-%m-%d'),
+                    'product': payment.installment_record.product_name,
+                    'notes': payment.notes or ''
+                })
+            
+            customers_data.append({
+                'id': str(customer.id),
+                'name': customer.name,
+                'mobile': customer.mobile_number,
+                'total_paid': str(customer_total_paid),
+                'payment_count': customer_payment_count,
+                'remaining': str(customer_remaining),
+                'paid_installments': customer_paid_installments,
+                'pending_installments': customer_pending_installments,
+                'payments': payment_records
+            })
+        
+        # Sort customers by total paid (descending)
+        customers_data.sort(key=lambda x: float(x['total_paid']), reverse=True)
+        
+        return Response({
+            'year': year,
+            'month': month,
+            'month_name': month_name[month],
+            'summary': {
+                'total_paid': str(total_paid),
+                'total_payments': total_payments,
+                'total_customers': len(customer_ids),
+                'paid_installments': paid_installments,
+                'pending_installments': pending_installments,
+                'total_remaining': str(total_remaining)
+            },
+            'customers': customers_data
+        })

@@ -18,6 +18,9 @@ from .views import (
     NotificationSettingsView,
     SupportTicketListCreateView,
     SupportTicketDetailView,
+    ForgotPasswordView,
+    VerifyOTPView,
+    ResetPasswordView,
 )
 
 urlpatterns = [
@@ -29,6 +32,11 @@ urlpatterns = [
     path('login/', LoginView.as_view(), name='login'),
     path('logout/', LogoutView.as_view(), name='logout'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
+    
+    # Password Reset
+    path('forgot-password/', ForgotPasswordView.as_view(), name='forgot-password'),
+    path('verify-otp/', VerifyOTPView.as_view(), name='verify-otp'),
+    path('reset-password/', ResetPasswordView.as_view(), name='reset-password'),
     
     # Profile
     path('profile/', ProfileView.as_view(), name='profile'),

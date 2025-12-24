@@ -1,1 +1,0 @@
-web: gunicorn installment_app.wsgi:application

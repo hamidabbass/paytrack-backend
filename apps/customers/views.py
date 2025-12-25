@@ -386,8 +386,7 @@ class PaymentRecordViewSet(viewsets.ModelViewSet):
         )['total'] or 0
         
         # Calculate total expected monthly installment from all active plans
-        # This is the sum of monthly_installment from all active InstallmentRecords
-        # that were active during this month (started before or during this month and not completed before this month)
+        # Sum of monthly_installment from all active (not completed) InstallmentRecords
         from datetime import date
         first_day_of_month = date(year, month, 1)
         if month == 12:
@@ -395,18 +394,20 @@ class PaymentRecordViewSet(viewsets.ModelViewSet):
         else:
             last_day_of_month = date(year, month + 1, 1)
         
-        # Get all active installment records that were active during this month
+        # Get all currently active installment records
+        # For current month, this shows what's expected to be paid
+        # For past months, this won't be fully accurate since we don't track when plans were completed
         active_plans = InstallmentRecord.objects.filter(
             shopkeeper=request.user,
-            start_date__lt=last_day_of_month  # Started before end of this month
-        ).exclude(
-            is_completed=True,
-            updated_at__lt=first_day_of_month  # Exclude if completed before this month started
+            is_completed=False  # Only active (not completed) plans
         )
         
         total_expected = active_plans.aggregate(
             total=Sum('monthly_installment')
         )['total'] or 0
+        
+        # Calculate remaining for this month (expected - paid this month)
+        monthly_remaining = max(0, float(total_expected) - float(total_paid))
         
         # Get customer details with their payments for this month
         customers_data = []

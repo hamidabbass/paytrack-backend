@@ -385,6 +385,29 @@ class PaymentRecordViewSet(viewsets.ModelViewSet):
             total=Sum('remaining_amount')
         )['total'] or 0
         
+        # Calculate total expected monthly installment from all active plans
+        # This is the sum of monthly_installment from all active InstallmentRecords
+        # that were active during this month (started before or during this month and not completed before this month)
+        from datetime import date
+        first_day_of_month = date(year, month, 1)
+        if month == 12:
+            last_day_of_month = date(year + 1, 1, 1)
+        else:
+            last_day_of_month = date(year, month + 1, 1)
+        
+        # Get all active installment records that were active during this month
+        active_plans = InstallmentRecord.objects.filter(
+            shopkeeper=request.user,
+            start_date__lt=last_day_of_month  # Started before end of this month
+        ).exclude(
+            is_completed=True,
+            updated_at__lt=first_day_of_month  # Exclude if completed before this month started
+        )
+        
+        total_expected = active_plans.aggregate(
+            total=Sum('monthly_installment')
+        )['total'] or 0
+        
         # Get customer details with their payments for this month
         customers_data = []
         unique_customers = Customer.objects.filter(
@@ -449,7 +472,9 @@ class PaymentRecordViewSet(viewsets.ModelViewSet):
                 'total_customers': len(customer_ids),
                 'paid_installments': paid_installments,
                 'pending_installments': pending_installments,
-                'total_remaining': str(total_remaining)
+                'total_remaining': str(total_remaining),
+                'total_expected': str(total_expected),
+                'active_plans_count': active_plans.count()
             },
             'customers': customers_data
         })
